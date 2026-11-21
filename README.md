@@ -26,11 +26,19 @@ Open a terminal:
 Run:
 
 ```bash
-git clone <repository-url>
-cd Robot
+git clone --recurse-submodules <repository-url>
+cd Factory-Patrol-Robot
 ```
 
 Ask the person who gave you the project for the repository URL.
+
+The `--recurse-submodules` option downloads the `analog_gauge_reader` model
+project. If you already cloned the project without submodules, run this from
+inside the project folder:
+
+```bash
+git submodule update --init --recursive
+```
 
 ## 2️⃣ Enter the Camera Stream Address
 
