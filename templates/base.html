@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Za3tar UI{% endblock %}</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            font-family: Arial, sans-serif;
+        }
+        body {
+            margin: 0;
+            background: #111827;
+            color: #f9fafb;
+        }
+        nav {
+            display: flex;
+            gap: 8px;
+            padding: 12px 24px;
+            background: #1f2937;
+            border-bottom: 1px solid #374151;
+        }
+        nav a {
+            padding: 8px 14px;
+            border-radius: 6px;
+            color: #d1d5db;
+            text-decoration: none;
+        }
+        nav .brand {
+            margin-right: 12px;
+            padding-left: 0;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        nav a:hover,
+        nav a.active {
+            background: #2563eb;
+            color: white;
+        }
+        nav a.brand:hover {
+            background: transparent;
+        }
+        .robot-status {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #d1d5db;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ef4444;
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.7);
+        }
+        .status-dot.connected {
+            background: #22c55e;
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.7);
+        }
+        .navbar-voltage {
+            min-width: 82px;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        main {
+            max-width: 1100px;
+            margin: 24px auto;
+            padding: 0 20px;
+        }
+        .stream-frame {
+            width: 100%;
+            min-height: 480px;
+            border: 1px solid #374151;
+            border-radius: 10px;
+            background: #030712;
+            object-fit: contain;
+        }
+        .empty-page {
+            min-height: 300px;
+            display: grid;
+            place-items: center;
+            color: #9ca3af;
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <nav>
+        <a href="/" class="brand">Za3tar</a>
+        <a href="/" class="{{ 'active' if active_page == 'home' else '' }}">Home</a>
+        <a href="/sensors" class="{{ 'active' if active_page == 'sensors' else '' }}">Sensors</a>
+        <a href="/stream" class="{{ 'active' if active_page == 'stream' else '' }}">Stream</a>
+        <a href="/control" class="{{ 'active' if active_page == 'control' else '' }}">Control</a>
+        <div class="robot-status">
+            <span class="status-dot" id="robot-status-dot" title="Disconnected"></span>
+            <span id="robot-status-text">Disconnected</span>
+            <span class="navbar-voltage" id="navbar-voltage">-- V</span>
+        </div>
+    </nav>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+    <script>
+        async function refreshRobotStatus() {
+            try {
+                const response = await fetch('/api/sensors');
+                const data = await response.json();
+                const dot = document.getElementById('robot-status-dot');
+                const text = document.getElementById('robot-status-text');
+                dot.className = data.connected ? 'status-dot connected' : 'status-dot';
+                dot.title = data.connected ? 'Connected' : 'Disconnected';
+                text.textContent = data.connected ? 'Connected' : 'Disconnected';
+                document.getElementById('navbar-voltage').textContent =
+                    data.voltage === null ? '-- V' : `${data.voltage} V`;
+            } catch (error) {
+                document.getElementById('robot-status-dot').className = 'status-dot';
+                document.getElementById('robot-status-text').textContent = 'Disconnected';
+                document.getElementById('navbar-voltage').textContent = '-- V';
+            }
+        }
+        refreshRobotStatus();
+        setInterval(refreshRobotStatus, 2000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+.env
+.git
+.venv
+venv
+env
+bin
+lib
+include
+__pycache__
+*.py[cod]
+*.egg-info
+Dockerfile

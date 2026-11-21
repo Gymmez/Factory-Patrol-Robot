@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  db:
+    image: timescale/timescaledb:latest-pg14
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: app_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/app_db
+      MODEL_DIR: /app/models
+      MJPEG_STREAM_URL: ${MJPEG_STREAM_URL:-http://192.168.1.11:8080/video}
+    volumes:
+      - ./models:/app/models:ro
+    depends_on:
+      - db
+
+volumes:
+  pgdata:
