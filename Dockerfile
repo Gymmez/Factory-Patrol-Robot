@@ -20,9 +20,11 @@ COPY requirements.txt .
 RUN python -m pip install --upgrade pip \
     && python -m pip install -r requirements.txt
 
-COPY . /app
+COPY gaugemodel.sh /app/gaugemodel.sh
 RUN chmod +x /app/gaugemodel.sh \
     && /app/gaugemodel.sh
+
+COPY . /app
 
 EXPOSE 8000
 
