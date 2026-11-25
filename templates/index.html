@@ -4,63 +4,73 @@
 
 {% block head %}
 <style>
-    .db-banner {
-        padding: 12px 16px;
-        border-radius: 8px;
-        margin-bottom: 16px;
-        border: 1px solid;
+    /* custom background: put your picture at static/home-bg.jpg
+       (if the file is missing, the dark gradient is shown instead) */
+    body {
+        background-color: var(--bg);
+        background-image:
+            linear-gradient(rgba(14, 19, 25, 0.70), rgba(14, 19, 25, 0.90)),
+            url('/static/home-bg.jpg');
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
     }
-    .db-banner--ok {
-        background: #064e3b;
-        color: #a7f3d0;
-        border-color: #10b981;
+    /* semi-transparent panels so the picture shows through a little */
+    .stat,
+    .stream-frame,
+    .db-status {
+        background: rgba(22, 29, 38, 0.78);
+        backdrop-filter: blur(8px);
     }
-    .db-banner--err {
-        background: #7f1d1d;
-        color: #fecaca;
-        border-color: #ef4444;
-    }
-    .home-status {
-        display: grid;
+    .home-stats {
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
-        margin-bottom: 12px;
+        margin-bottom: 14px;
     }
-    .home-value {
+    .db-status {
+        margin-top: 14px;
+        padding: 10px 16px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        font-size: 14px;
+    }
+    .db-status summary {
+        cursor: pointer;
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        padding: 14px 16px;
-        border: 1px solid #374151;
-        border-radius: 8px;
-        background: #1f2937;
+        gap: 10px;
     }
-    .home-value span {
-        color: #9ca3af;
-    }
-    .home-value strong {
-        font-size: 20px;
+    .db-status p {
+        margin: 10px 0 0;
+        color: var(--muted);
+        word-break: break-word;
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="db-banner {{ 'db-banner--ok' if db_ok else 'db-banner--err' }}">
-    <strong>Database Connection:</strong> {{ db_detail }}
+<h1>Robot camera</h1>
+
+<div class="stat-grid home-stats" id="home-stats">
+    <div class="stat">
+        <h2>Temperature</h2>
+        <div class="stat-value" id="home-temperature">-- °C</div>
+    </div>
+    <div class="stat">
+        <h2>Voltage</h2>
+        <div class="stat-value" id="home-voltage">-- V</div>
+    </div>
 </div>
 
-<h1>Robot Camera</h1>
-<div class="home-status">
-    <div class="home-value">
-        <span>Temperature</span>
-        <strong id="home-temperature">-- °C</strong>
-    </div>
-    <div class="home-value">
-        <span>Voltage</span>
-        <strong id="home-voltage">-- V</strong>
-    </div>
-</div>
 <img class="stream-frame" src="/video_feed" alt="Live robot camera stream">
+
+<details class="db-status">
+    <summary>
+        <span class="status-dot {{ 'connected' if db_ok else '' }}"></span>
+        {{ 'Database connected' if db_ok else 'Database disconnected' }}
+    </summary>
+    <p>{{ db_detail }}</p>
+</details>
+
 <script>
     async function refreshHomeValues() {
         try {
@@ -70,6 +80,8 @@
                 data.temperature === null ? '-- °C' : `${data.temperature} °C`;
             document.getElementById('home-voltage').textContent =
                 data.voltage === null ? '-- V' : `${data.voltage} V`;
+            // grey out the numbers if the robot stopped sending
+            document.getElementById('home-stats').classList.toggle('offline', !data.robot_online);
         } catch (error) {
             document.getElementById('home-temperature').textContent = '-- °C';
             document.getElementById('home-voltage').textContent = '-- V';

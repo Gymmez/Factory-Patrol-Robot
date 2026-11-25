@@ -1,11 +1,13 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import os
+import time
 from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import httpx
 from pydantic import BaseModel, Field
@@ -18,6 +20,13 @@ MJPEG_STREAM_URL = os.getenv(
     "MJPEG_STREAM_URL",
     "http://127.0.0.1:5000/video_feed",  # default value if not set in .env file
 )
+
+# remembers the last camera check so we don't hit the camera on every page refresh
+CAMERA_CHECK_EVERY = 10  # seconds
+camera_cache = {"connected": False, "checked_at": 0.0}
+
+# no new data for this many seconds = robot is offline
+OFFLINE_AFTER = 15
 
 
 def build_async_database_url(raw_url: str | None) -> str:
@@ -47,8 +56,12 @@ async def check_database_status(engine: AsyncEngine) -> tuple[bool, str, dict[st
             sensor_count = int(sensor_row.count or 0)
             sensor_names = sensor_row.names or "none"
 
+            # approximate_row_count is a fast estimate (count(*) scans the whole table)
             metrics_res = await conn.execute(
-                text("SELECT count(*) AS total_rows, max(time) AS last_time FROM metrics")
+                text(
+                    "SELECT GREATEST(approximate_row_count('metrics'), 0) AS total_rows, "
+                    "max(time) AS last_time FROM metrics"
+                )
             )
             metrics_row = metrics_res.one()
             total_metrics = int(metrics_row.total_rows or 0)
@@ -57,7 +70,7 @@ async def check_database_status(engine: AsyncEngine) -> tuple[bool, str, dict[st
         last_time_str = last_time.isoformat() if last_time else "no rows yet"
         detail = (
             f"Connected | Sensors: {sensor_count} ({sensor_names}) | "
-            f"Metrics rows: {total_metrics} | Last write: {last_time_str}"
+            f"Metrics rows (approx): {total_metrics} | Last write: {last_time_str}"
         )
         info = {
             "sensor_count": sensor_count,
@@ -68,6 +81,31 @@ async def check_database_status(engine: AsyncEngine) -> tuple[bool, str, dict[st
         return True, detail, info
     except Exception as exc:
         return False, f"Disconnected: {exc}", {}
+
+
+async def load_sensor_map(engine: AsyncEngine) -> dict[str, int]:
+    # sensor names -> ids, e.g. {"battery": 1, "voltage": 2}
+    async with engine.connect() as conn:
+        rows = await conn.execute(text("SELECT sensorid, sensorname FROM sensors"))
+        return {row.sensorname: int(row.sensorid) for row in rows}
+
+
+async def is_camera_connected() -> bool:
+    # only check the camera again if the last check is older than 10 seconds
+    if time.time() - camera_cache["checked_at"] < CAMERA_CHECK_EVERY:
+        return camera_cache["connected"]
+
+    connected = False
+    try:
+        async with httpx.AsyncClient(timeout=2) as client:
+            async with client.stream("GET", MJPEG_STREAM_URL) as response:
+                connected = response.status_code == 200
+    except httpx.RequestError:
+        pass
+
+    camera_cache["connected"] = connected
+    camera_cache["checked_at"] = time.time()
+    return connected
 
 
 @asynccontextmanager
@@ -89,6 +127,13 @@ async def lifespan(app: FastAPI):
     else:
         print(f"[DB] Startup check failed -> {detail}")
 
+    # load the sensor list once (it never changes while the app runs)
+    app.state.sensor_map = {}
+    try:
+        app.state.sensor_map = await load_sensor_map(engine)
+    except Exception as exc:
+        print(f"[DB] Could not load sensors: {exc}")
+
     try:
         yield
     finally:
@@ -98,6 +143,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
+
+# serves files from the static/ folder (the home page background image lives there)
+app.mount("/static", StaticFiles(directory="static", check_dir=False), name="static")
 
 
 # basic health check used by "docker compose ps" / monitoring
@@ -163,35 +211,41 @@ async def sensor_values(request: Request):
     }
     latest_time = None
 
-    # pull the latest reading for each sensor out of the database
+    # one query: for each sensor, take the row with the newest time
     try:
         async with engine.connect() as conn:
-            sensors = await conn.execute(text("SELECT sensorid, sensorname FROM sensors"))
-            for sensor in sensors.all():
-                row = (await conn.execute(
-                    text("SELECT value, time FROM metrics WHERE sensorid = :id ORDER BY time DESC LIMIT 1"),
-                    {"id": sensor.sensorid},
-                )).first()
-                if row is not None:
-                    readings[sensor.sensorname] = row.value
-                    latest_time = max(latest_time, row.time) if latest_time else row.time
+            result = await conn.execute(
+                text(
+                    """
+                    SELECT DISTINCT ON (s.sensorid) s.sensorname, m.value, m.time
+                    FROM sensors s
+                    JOIN metrics m ON m.sensorid = s.sensorid
+                    ORDER BY s.sensorid, m.time DESC
+                    """
+                )
+            )
+            for row in result.all():
+                readings[row.sensorname] = row.value
+                if latest_time is None or row.time > latest_time:
+                    latest_time = row.time
     except Exception as exc:
         # database read failed, just keep readings as None instead of crashing
         print(f"[sensors] DB read failed: {exc}")
 
-    # check if the robot's camera stream is currently reachable
-    connected = False
-    try:
-        async with httpx.AsyncClient(timeout=2) as client:
-            async with client.stream("GET", MJPEG_STREAM_URL) as response:
-                connected = response.status_code == 200
-    except httpx.RequestError:
-        pass
+    # check if the robot's camera stream is reachable (cached for 10 seconds)
+    connected = await is_camera_connected()
+
+    # robot is online only if we got data recently
+    robot_online = False
+    if latest_time is not None:
+        age = (datetime.now(timezone.utc) - latest_time).total_seconds()
+        robot_online = age <= OFFLINE_AFTER
 
     # send everything back to the webpage
     return {
         **readings,
         "connected": connected,
+        "robot_online": robot_online,
         "updated_at": latest_time.isoformat() if latest_time else datetime.now(timezone.utc).isoformat(),
     }
 
@@ -202,33 +256,40 @@ async def ingest_readings(payload: IngestPayload, request: Request):
     engine: AsyncEngine = request.app.state.engine
     now_utc = datetime.now(timezone.utc)
 
+    # use the sensor list loaded at startup (reload it if it was empty)
+    sensor_map: dict[str, int] = request.app.state.sensor_map
+    if not sensor_map:
+        try:
+            sensor_map = await load_sensor_map(engine)
+            request.app.state.sensor_map = sensor_map
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Could not load sensors: {exc}",
+            ) from exc
+
+    unknown_keys = [name for name in payload.readings if name not in sensor_map]
+    if unknown_keys:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "Unknown sensor name(s)",
+                "unknown_sensors": unknown_keys,
+                "allowed_sensors": sorted(sensor_map.keys()),
+            },
+        )
+
+    insert_rows = [
+        {
+            "time": now_utc,
+            "sensorid": sensor_map[sensor_name],
+            "value": float(value),
+        }
+        for sensor_name, value in payload.readings.items()
+    ]
+
     try:
         async with engine.begin() as conn:
-            sensor_rows = await conn.execute(text("SELECT sensorid, sensorname FROM sensors"))
-            sensor_map: dict[str, int] = {
-                row.sensorname: int(row.sensorid) for row in sensor_rows
-            }
-
-            unknown_keys = [name for name in payload.readings if name not in sensor_map]
-            if unknown_keys:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail={
-                        "message": "Unknown sensor name(s)",
-                        "unknown_sensors": unknown_keys,
-                        "allowed_sensors": sorted(sensor_map.keys()),
-                    },
-                )
-
-            insert_rows = [
-                {
-                    "time": now_utc,
-                    "sensorid": sensor_map[sensor_name],
-                    "value": float(value),
-                }
-                for sensor_name, value in payload.readings.items()
-            ]
-
             await conn.execute(
                 text(
                     """
@@ -244,8 +305,6 @@ async def ingest_readings(payload: IngestPayload, request: Request):
             "timestamp": now_utc.isoformat(),
             "readings": payload.readings,
         }
-    except HTTPException:
-        raise
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -2,60 +2,35 @@
 
 {% block title %}Sensors{% endblock %}
 
-{% block head %}
-<style>
-    .sensor-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: 16px;
-    }
-    .sensor-card {
-        padding: 20px;
-        border: 1px solid #374151;
-        border-radius: 10px;
-        background: #1f2937;
-    }
-    .sensor-card h2 {
-        margin: 0 0 12px;
-        color: #9ca3af;
-        font-size: 14px;
-    }
-    .sensor-value {
-        font-size: 28px;
-        font-weight: bold;
-    }
-</style>
-{% endblock %}
-
 {% block content %}
-<h1>Realtime Sensors</h1>
-<div class="sensor-grid">
-    <article class="sensor-card">
+<h1>Sensors</h1>
+<div class="stat-grid" id="sensor-grid">
+    <article class="stat">
         <h2>Battery</h2>
-        <div class="sensor-value" id="battery">--</div>
+        <div class="stat-value" id="battery">--</div>
     </article>
-    <article class="sensor-card">
-        <h2>Temperature</h2>
-        <div class="sensor-value" id="temperature">--</div>
-    </article>
-    <article class="sensor-card">
-        <h2>Distance</h2>
-        <div class="sensor-value" id="distance">--</div>
-    </article>
-    <article class="sensor-card">
-        <h2>Humidity</h2>
-        <div class="sensor-value" id="humidity">--</div>
-    </article>
-    <article class="sensor-card">
-        <h2>Light</h2>
-        <div class="sensor-value" id="light">--</div>
-    </article>
-    <article class="sensor-card">
+    <article class="stat">
         <h2>Voltage</h2>
-        <div class="sensor-value" id="voltage">--</div>
+        <div class="stat-value" id="voltage">--</div>
+    </article>
+    <article class="stat">
+        <h2>Temperature</h2>
+        <div class="stat-value" id="temperature">--</div>
+    </article>
+    <article class="stat">
+        <h2>Humidity</h2>
+        <div class="stat-value" id="humidity">--</div>
+    </article>
+    <article class="stat">
+        <h2>Distance</h2>
+        <div class="stat-value" id="distance">--</div>
+    </article>
+    <article class="stat">
+        <h2>Light</h2>
+        <div class="stat-value" id="light">--</div>
     </article>
 </div>
-<p id="sensor-status">Waiting for sensor data...</p>
+<p id="sensor-status" class="muted">Waiting for sensor data...</p>
 
 <script>
     async function refreshSensors() {
@@ -64,18 +39,23 @@
             const data = await response.json();
             document.getElementById('battery').textContent =
                 data.battery === null ? '--' : `${data.battery}%`;
-            document.getElementById('temperature').textContent =
-                data.temperature === null ? '--' : `${data.temperature} °C`;
-            document.getElementById('distance').textContent =
-                data.distance === null ? '--' : `${data.distance} cm`;
-            document.getElementById('humidity').textContent =
-                data.humidity === null ? '--' : `${data.humidity}%`;
-            document.getElementById('light').textContent =
-                data.light === null ? '--' : (data.light === 1 ? 'Light' : data.light === 0 ? 'Dark' : 'Invalid');
             document.getElementById('voltage').textContent =
                 data.voltage === null ? '--' : `${data.voltage} V`;
-            document.getElementById('sensor-status').textContent =
-                `Last update: ${new Date(data.updated_at).toLocaleTimeString()}`;
+            document.getElementById('temperature').textContent =
+                data.temperature === null ? '--' : `${data.temperature} °C`;
+            document.getElementById('humidity').textContent =
+                data.humidity === null ? '--' : `${data.humidity}%`;
+            document.getElementById('distance').textContent =
+                data.distance === null ? '--' : `${data.distance} cm`;
+            document.getElementById('light').textContent =
+                data.light === null ? '--' : (data.light === 1 ? 'Light' : data.light === 0 ? 'Dark' : 'Invalid');
+
+            // grey out the numbers if the robot stopped sending
+            const lastSeen = new Date(data.updated_at).toLocaleTimeString();
+            document.getElementById('sensor-grid').classList.toggle('offline', !data.robot_online);
+            document.getElementById('sensor-status').textContent = data.robot_online
+                ? `Last update: ${lastSeen}`
+                : `Robot offline, last seen ${lastSeen}`;
         } catch (error) {
             document.getElementById('sensor-status').textContent =
                 'Unable to load sensor data.';

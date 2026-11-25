@@ -4,6 +4,7 @@
 
 {% block head %}
 <style>
+    /* full-screen camera: fill everything under the top bar */
     body {
         overflow: hidden;
     }
@@ -11,10 +12,7 @@
         max-width: none;
         margin: 0;
         padding: 0;
-        height: calc(100vh - 61px);
-    }
-    main h1 {
-        display: none;
+        height: calc(100vh - var(--nav-h));
     }
     .stream-frame {
         width: 100%;
@@ -22,7 +20,6 @@
         min-height: 0;
         border: none;
         border-radius: 0;
-        object-fit: contain;
     }
 </style>
 {% endblock %}
